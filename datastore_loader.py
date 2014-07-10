@@ -3,8 +3,9 @@
 
 import argparse, logging
 import os.path, re, unicodedata
-import urllib2, json, cStringIO, hashlib
+import urllib2, cStringIO, hashlib
 from datetime import datetime
+import simplejson as json
 from ckan_client import CkanClient, CkanApiError, CkanAccessDenied
 
 # Configure Logging
@@ -393,11 +394,11 @@ def upload_resource_records(resource, schema, recorditer, ckan):
     # If the error from CKAN has __type == "Not Found Error",
     # silently continue --- it means there is no datastore for
     # this resource yet.
-    ckan_action(ckan, "datastore_delete", { "resource_id": resource["id"] },
+    ckan_action(ckan, "datastore_delete", { "resource_id": resource["id"], "force": True },
         squash_errors_if = lambda err : err["__type"] == "Not Found Error")
     
     # Create the datastore.
-    ckan_action(ckan, "datastore_create", {
+    params = {
         "resource_id": resource["id"],
         "fields": [
             {
@@ -405,7 +406,9 @@ def upload_resource_records(resource, schema, recorditer, ckan):
                 "type": col["type"].split(":")[0],
             } for cidx, col in enumerate(schema["columns"]) ],
         "primary_key": schema.get("primary_key", None),
-        })
+        "force": True,
+        }
+    ckan_action(ckan, "datastore_create", params)
         # TODO: also send primary_key, indexes?
     
     # Helper function to send rows in batches.
@@ -426,7 +429,6 @@ def upload_resource_records(resource, schema, recorditer, ckan):
         # Return value must be JSON-serializable so we can pass it
         # through the API. Then datastore had better know how to
         # convert that into a string for the SQL statement.
-        
         # Get the type converter for the column's datatype.
         import messytables.types
         datastore_messytable_type_mapping = {
@@ -438,7 +440,6 @@ def upload_resource_records(resource, schema, recorditer, ckan):
             'timestamp': messytables.types.DateType,
         }
         typ = datastore_messytable_type_mapping[datatype.split(":")[0]]
-
         if cell.type != None and not isinstance(cell.type, messytables.types.StringType):
             # The XLS parser does type conversion for us. Just check
             # that the cell datatype matches the column datatype.
@@ -508,11 +509,12 @@ def upload_resource_records(resource, schema, recorditer, ckan):
             rownum += 1
             
         # Execute API call.
-        ckan_action(ckan, "datastore_upsert", {
+        ckan_action(ckan, "datastore_create", {
             "resource_id": resource["id"],
-            "method": "insert",
-            "records": payload,
-            })
+            "method": "upsert",
+            "records": json.loads(json.dumps(payload)),
+            "force": True,
+        })
         
     return rownum
         
